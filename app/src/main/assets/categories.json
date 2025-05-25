@@ -1,0 +1,186 @@
+[
+  {
+    "category": "leafy_greens",
+    "density": 0.15,
+    "calories": 25,
+    "protein": 2.5,
+    "fat": 0.3,
+    "carbs": 3.6
+  },
+  {
+    "category": "stem_vegetables",
+    "density": 0.2,
+    "calories": 20,
+    "protein": 2.0,
+    "fat": 0.2,
+    "carbs": 3.6
+  },
+  {
+    "category": "non-starchy_roots",
+    "density": 0.8,
+    "calories": 40,
+    "protein": 1.0,
+    "fat": 0.2,
+    "carbs": 9.6
+  },
+  {
+    "category": "other_vegetables",
+    "density": 0.7,
+    "calories": 30,
+    "protein": 2.0,
+    "fat": 0.3,
+    "carbs": 5.5
+  },
+  {
+    "category": "fruits",
+    "density": 0.6,
+    "calories": 50,
+    "protein": 0.7,
+    "fat": 0.2,
+    "carbs": 14.0
+  },
+  {
+    "category": "meats",
+    "density": 1.0,
+    "calories": 250,
+    "protein": 26.0,
+    "fat": 17.0,
+    "carbs": 0.0
+  },
+  {
+    "category": "poultry",
+    "density": 1.0,
+    "calories": 240,
+    "protein": 27.0,
+    "fat": 14.0,
+    "carbs": 0.0
+  },
+  {
+    "category": "seafood",
+    "density": 1.05,
+    "calories": 120,
+    "protein": 20.0,
+    "fat": 4.0,
+    "carbs": 0.0
+  },
+  {
+    "category": "eggs",
+    "density": 1.03,
+    "calories": 155,
+    "protein": 13.0,
+    "fat": 11.0,
+    "carbs": 1.1
+  },
+  {
+    "category": "beans_nuts",
+    "density": 0.7,
+    "calories": 270,
+    "protein": 15.0,
+    "fat": 18.0,
+    "carbs": 20.0
+  },
+  {
+    "category": "baked_goods",
+    "density": 0.25,
+    "calories": 300,
+    "protein": 7.0,
+    "fat": 10.0,
+    "carbs": 40.0
+  },
+  {
+    "category": "rice_grains_cereals",
+    "density": 0.85,
+    "calories": 360,
+    "protein": 7.0,
+    "fat": 2.0,
+    "carbs": 77.0
+  },
+  {
+    "category": "noodles_pasta",
+    "density": 0.6,
+    "calories": 350,
+    "protein": 12.0,
+    "fat": 2.0,
+    "carbs": 70.0
+  },
+  {
+    "category": "starchy_vegetables",
+    "density": 0.8,
+    "calories": 80,
+    "protein": 2.0,
+    "fat": 0.1,
+    "carbs": 17.0
+  },
+  {
+    "category": "other_starches",
+    "density": 1.3,
+    "calories": 350,
+    "protein": 7.0,
+    "fat": 0.4,
+    "carbs": 80.0
+  },
+  {
+    "category": "soups_stews",
+    "density": 1.01,
+    "calories": 50,
+    "protein": 3.0,
+    "fat": 2.0,
+    "carbs": 6.0
+  },
+  {
+    "category": "herbs_spices",
+    "density": 0.2,
+    "calories": 250,
+    "protein": 10.0,
+    "fat": 5.0,
+    "carbs": 50.0
+  },
+  {
+    "category": "dairy",
+    "density": 1.03,
+    "calories": 120,
+    "protein": 8.0,
+    "fat": 8.0,
+    "carbs": 6.0
+  },
+  {
+    "category": "snacks",
+    "density": 0.5,
+    "calories": 450,
+    "protein": 6.0,
+    "fat": 24.0,
+    "carbs": 50.0
+  },
+  {
+    "category": "sweets_desserts",
+    "density": 0.6,
+    "calories": 300,
+    "protein": 4.0,
+    "fat": 10.0,
+    "carbs": 45.0
+  },
+  {
+    "category": "beverages",
+    "density": 1.0,
+    "calories": 50,
+    "protein": 0.1,
+    "fat": 0.0,
+    "carbs": 12.0
+  },
+  {
+    "category": "fats_oils_sauces",
+    "density": 0.9,
+    "calories": 900,
+    "protein": 0.0,
+    "fat": 100.0,
+    "carbs": 0.0
+  },
+  {
+    "category": "other_food",
+    "density": 1.0,
+    "calories": 200,
+    "protein": 5.0,
+    "fat": 10.0,
+    "carbs": 20.0
+  }
+]
