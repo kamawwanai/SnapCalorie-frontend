@@ -37,12 +37,29 @@ fun ProfileScreen(
     val userData by viewModel.userData.collectAsState()
     val planData by viewModel.planData.collectAsState()
     val profileData by viewModel.profileData.collectAsState()
+    val error by viewModel.error.collectAsState()
     var currentScreen by remember { mutableStateOf(Screen.PROFILE) }
+    
+    // Определяем состояние загрузки
+    val isLoading = userData == null || planData == null || profileData == null
 
     LaunchedEffect(Unit) {
-        viewModel.loadUserData()
-        viewModel.loadPlanData()
-        viewModel.loadProfileData()
+        android.util.Log.d("ProfileScreen", "LaunchedEffect triggered")
+        android.util.Log.d("ProfileScreen", "Current data state - userData: ${userData != null}, planData: ${planData != null}, profileData: ${profileData != null}")
+        
+        // Загружаем данные только если они еще не загружены
+        if (userData == null) {
+            android.util.Log.d("ProfileScreen", "Loading user data...")
+            viewModel.loadUserData()
+        }
+        if (planData == null) {
+            android.util.Log.d("ProfileScreen", "Loading plan data...")
+            viewModel.loadPlanData()
+        }
+        if (profileData == null) {
+            android.util.Log.d("ProfileScreen", "Loading profile data...")
+            viewModel.loadProfileData()
+        }
     }
 
     if (showLogoutDialog) {
@@ -137,6 +154,40 @@ fun ProfileScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // Показываем ошибку, если есть
+            error?.let { errorMessage ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Red10),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = errorMessage,
+                        color = Red70,
+                        modifier = Modifier.padding(16.dp),
+                        fontSize = 14.sp
+                    )
+                }
+            }
+            
+            // Показываем loading или контент
+            if (isLoading) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        CircularProgressIndicator(color = Green50)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Загрузка профиля...",
+                            color = Base80
+                        )
+                    }
+                }
+            } else {
             // Information Container
             Column(
                 modifier = Modifier
@@ -495,6 +546,7 @@ fun ProfileScreen(
                     }
                 }
             }
+            } // Закрываем else блок
 
             // Buttons Container
             Column(

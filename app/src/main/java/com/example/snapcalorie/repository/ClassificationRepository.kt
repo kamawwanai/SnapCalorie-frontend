@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import com.example.snapcalorie.model.ClassificationResponse
-import com.example.snapcalorie.model.DetailedClassificationResponse
 import com.example.snapcalorie.network.ApiService
 import com.example.snapcalorie.storage.TokenStorage
 import kotlinx.coroutines.Dispatchers
@@ -76,31 +75,6 @@ class ClassificationRepository(
                 regions.map { bitmap ->
                     classifyImageBitmap(bitmap)
                 }
-            } catch (e: Exception) {
-                throw handleNetworkException(e)
-            }
-        }
-
-    suspend fun classifyImageDetailed(context: Context, imageUri: Uri): DetailedClassificationResponse =
-        withContext(Dispatchers.IO) {
-            try {
-                val token = tokenStorage.token
-                    ?: throw IllegalStateException("No token available - please login")
-
-                // Читаем изображение из URI
-                val inputStream = context.contentResolver.openInputStream(imageUri)
-                val imageBytes = inputStream?.readBytes()
-                inputStream?.close()
-
-                if (imageBytes == null) {
-                    throw IllegalStateException("Failed to read image from URI")
-                }
-
-                // Создаем MultipartBody.Part для отправки файла
-                val requestBody = imageBytes.toRequestBody("image/*".toMediaTypeOrNull())
-                val filePart = MultipartBody.Part.createFormData("file", "image.jpg", requestBody)
-
-                api.classifyImageDetailed("Bearer $token", filePart)
             } catch (e: Exception) {
                 throw handleNetworkException(e)
             }

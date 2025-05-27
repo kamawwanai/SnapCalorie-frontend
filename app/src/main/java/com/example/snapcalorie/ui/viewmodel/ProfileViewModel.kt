@@ -9,6 +9,7 @@ import kotlinx.coroutines.launch
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
+import android.util.Log
 
 data class UserData(
     val id: Int,
@@ -69,9 +70,12 @@ class ProfileViewModel(
     fun loadUserData() {
         viewModelScope.launch {
             try {
+                android.util.Log.d("ProfileViewModel", "Loading user data...")
                 val response = apiService.getUserData(getToken())
                 _userData.value = response
+                android.util.Log.d("ProfileViewModel", "User data loaded successfully")
             } catch (e: Exception) {
+                android.util.Log.e("ProfileViewModel", "Failed to load user data", e)
                 _error.value = "Не удалось загрузить данные пользователя: ${e.message}"
             }
         }
@@ -80,9 +84,12 @@ class ProfileViewModel(
     fun loadPlanData() {
         viewModelScope.launch {
             try {
+                Log.d("ProfileViewModel", "Loading plan data...")
                 val response = apiService.getPlanData(getToken())
                 _planData.value = response
+                Log.d("ProfileViewModel", "Plan data loaded successfully")
             } catch (e: Exception) {
+                Log.e("ProfileViewModel", "Failed to load plan data", e)
                 _error.value = "Не удалось загрузить данные плана: ${e.message}"
             }
         }
@@ -91,9 +98,12 @@ class ProfileViewModel(
     fun loadProfileData() {
         viewModelScope.launch {
             try {
+                Log.d("ProfileViewModel", "Loading profile data...")
                 val response = apiService.getProfileData(getToken())
                 _profileData.value = response
+                Log.d("ProfileViewModel", "Profile data loaded successfully")
             } catch (e: Exception) {
+                Log.e("ProfileViewModel", "Failed to load profile data", e)
                 _error.value = "Не удалось загрузить данные профиля: ${e.message}"
             }
         }

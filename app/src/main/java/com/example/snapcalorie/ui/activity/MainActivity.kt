@@ -132,9 +132,20 @@ class MainActivity : ComponentActivity() {
                         }
                         authError != null -> {
                             // Ошибка авторизации - токен недействительный
-                            tokenStorage.clear()
-                            startActivity(Intent(this@MainActivity, LoginActivity::class.java))
-                            finish()
+                            val errorMessage = authError
+                            Log.w("MainActivity", "Auth error detected: $errorMessage")
+                            // Только очищаем токен если это действительно ошибка авторизации
+                            if (errorMessage?.contains("Authentication failed") == true || 
+                                errorMessage?.contains("401") == true ||
+                                errorMessage?.contains("Unauthorized") == true) {
+                                Log.w("MainActivity", "Clearing token due to auth error")
+                                tokenStorage.clear()
+                                startActivity(Intent(this@MainActivity, LoginActivity::class.java))
+                                finish()
+                            } else {
+                                Log.w("MainActivity", "Non-auth error, not clearing token: $errorMessage")
+                                showError = errorMessage
+                            }
                         }
                     }
                 }
@@ -164,9 +175,14 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(Unit) {
                     onboardingPlanViewModel.error.collectLatest { error ->
                         if (error != null) {
-                            showError = error
-                            // Если ошибка авторизации - возвращаемся к логину
-                            if (error.contains("401") || error.contains("Authentication")) {
+                            val errorMessage = error
+                            Log.w("MainActivity", "OnboardingPlan error: $errorMessage")
+                            showError = errorMessage
+                            // Только очищаем токен если это критическая ошибка авторизации
+                            if (errorMessage?.contains("401") == true || 
+                                errorMessage?.contains("Authentication failed") == true ||
+                                errorMessage?.contains("Unauthorized") == true) {
+                                Log.w("MainActivity", "Clearing token due to onboarding auth error")
                                 tokenStorage.clear()
                                 startActivity(Intent(this@MainActivity, LoginActivity::class.java))
                                 finish()

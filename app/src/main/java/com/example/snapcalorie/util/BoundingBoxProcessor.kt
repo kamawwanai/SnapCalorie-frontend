@@ -20,11 +20,139 @@ data class ClassificationRegion(
     val croppedBitmap: Bitmap
 )
 
+data class DishTypeGroup(
+    val dishType: String,
+    val boundingBoxes: List<ClassBoundingBox>,
+    val requiredClasses: Set<String>
+)
+
+data class DishTypeClassificationRegion(
+    val dishType: String,
+    val classIds: Set<Int>,
+    val classNames: Set<String>,
+    val boundingBox: Rect,
+    val croppedBitmap: Bitmap,
+    val requiredClasses: Set<String>
+)
+
+data class DishTypeClassificationResult(
+    val region: DishTypeClassificationRegion,
+    val classificationResult: String
+)
+
 object BoundingBoxProcessor {
     
     // Классы, которые нужно объединять если они близко
     private val mergeableClasses = setOf("beverages", "soups_stews", "dairy", "fats_oils_sauces")
     private const val MERGE_DISTANCE_THRESHOLD = 10
+    
+    // Группировка классов по типу блюда для классификации
+    private val mergeGroupsByDishType = mapOf(
+        // Салат — всё «зелёное» и хрустящее
+        "salad" to setOf(
+            "leafy_greens",
+            "herbs_spices",
+            "other_vegetables",
+            "stem_vegetables",
+            "non-starchy_roots"
+        ),
+
+        // Суп — бульон + овощи + бобовые + крахмал + масла/соусы
+        "soup" to setOf(
+            "soups_stews",
+            "non-starchy_roots",
+            "other_vegetables",
+            "beans_nuts",
+            "starchy_vegetables",
+            "other_starches",
+            "herbs_spices",
+            "fats_oils_sauces"
+        ),
+
+        // Рагу/stew — мясо/рыба + овощи + крахмал
+        "stew" to setOf(
+            "soups_stews",
+            "meats",
+            "poultry",
+            "seafood",
+            "non-starchy_roots",
+            "other_vegetables",
+            "beans_nuts",
+            "starchy_vegetables",
+            "other_starches"
+        ),
+
+        // Смузи/коктейль — фрукты + молочка + специи/травы
+        "smoothie" to setOf(
+            "fruits",
+            "dairy",
+            "beverages",
+            "herbs_spices"
+        ),
+
+        // Зерновая миска — крупы + бобовые + овощи/фрукты + молочка
+        "grain_bowl" to setOf(
+            "rice_grains_cereals",
+            "beans_nuts",
+            "other_vegetables",
+            "fruits",
+            "dairy"
+        ),
+
+        // Паста — макароны + соус + (опционально) белок и овощи
+        "pasta" to setOf(
+            "noodles_pasta",
+            "fats_oils_sauces",
+            "other_vegetables",
+            "beans_nuts",
+            "meats",
+            "seafood",
+            "dairy"
+        ),
+
+        // Сэндвич/бургер — выпечка + белок + овощи/соус
+        "sandwich" to setOf(
+            "baked_goods",
+            "meats",
+            "poultry",
+            "other_vegetables",
+            "dairy",
+            "fats_oils_sauces"
+        ),
+
+        // Пицца — тесто + топпинги + сыр + соус
+        "pizza" to setOf(
+            "baked_goods",
+            "meats",
+            "poultry",
+            "seafood",
+            "other_vegetables",
+            "dairy",
+            "fats_oils_sauces"
+        ),
+
+        // Десерт — сладкое + выпечка + фрукты/молочка
+        "dessert" to setOf(
+            "sweets_desserts",
+            "baked_goods",
+            "fruits",
+            "dairy"
+        ),
+
+        // Напиток — жидкости + молочка + фрукты/специи
+        "beverage" to setOf(
+            "beverages",
+            "dairy",
+            "fruits",
+            "herbs_spices"
+        ),
+
+        // Лёгкий перекус — «снэки» и прочее
+        "snack" to setOf(
+            "snacks",
+            "other_food"
+        )
+    )
     
     /**
      * Находит bounding box для каждого класса в маске
@@ -332,6 +460,110 @@ object BoundingBoxProcessor {
                 // Берем первый класс в группе как целевой
                 val targetClassId = group.first().classId
                 val allClassIds = group.map { it.classId }.toSet()
+                
+                // Заменяем все пиксели других классов в группе на целевой класс
+                for (y in 0 until height) {
+                    for (x in 0 until width) {
+                        val currentClassId = newMask[y][x]
+                        if (allClassIds.contains(currentClassId) && currentClassId != targetClassId) {
+                            newMask[y][x] = targetClassId
+                        }
+                    }
+                }
+            }
+        }
+        
+        return newMask
+    }
+    
+    /**
+     * Группирует классы по типу блюда для более точной классификации
+     */
+    fun groupClassesByDishType(
+        boundingBoxes: List<ClassBoundingBox>
+    ): List<DishTypeGroup> {
+        val dishGroups = mutableListOf<DishTypeGroup>()
+        val usedClassIds = mutableSetOf<Int>()
+        
+        // Для каждого типа блюда проверяем, есть ли подходящие классы
+        mergeGroupsByDishType.forEach { (dishType, requiredClasses) ->
+            val matchingBoxes = boundingBoxes.filter { box ->
+                !usedClassIds.contains(box.classId) && 
+                requiredClasses.contains(box.className.lowercase())
+            }
+            
+            // Если найдено достаточно классов для этого типа блюда (минимум 2)
+            if (matchingBoxes.size >= 2) {
+                dishGroups.add(
+                    DishTypeGroup(
+                        dishType = dishType,
+                        boundingBoxes = matchingBoxes,
+                        requiredClasses = requiredClasses
+                    )
+                )
+                // Помечаем использованные классы
+                matchingBoxes.forEach { usedClassIds.add(it.classId) }
+            }
+        }
+        
+        // Добавляем оставшиеся классы как отдельные группы
+        val remainingBoxes = boundingBoxes.filter { !usedClassIds.contains(it.classId) }
+        remainingBoxes.forEach { box ->
+            dishGroups.add(
+                DishTypeGroup(
+                    dishType = "individual",
+                    boundingBoxes = listOf(box),
+                    requiredClasses = setOf(box.className.lowercase())
+                )
+            )
+        }
+        
+        return dishGroups
+    }
+    
+    /**
+     * Создает регионы для классификации на основе групп типов блюд
+     */
+    fun createDishTypeClassificationRegions(
+        originalBitmap: Bitmap,
+        dishGroups: List<DishTypeGroup>
+    ): List<DishTypeClassificationRegion> {
+        return dishGroups.map { group ->
+            val combinedBounds = combineBoundingBoxes(group.boundingBoxes.map { it.boundingBox })
+            val croppedBitmap = cropBitmap(originalBitmap, combinedBounds)
+            
+            DishTypeClassificationRegion(
+                dishType = group.dishType,
+                classIds = group.boundingBoxes.map { it.classId }.toSet(),
+                classNames = group.boundingBoxes.map { it.className }.toSet(),
+                boundingBox = combinedBounds,
+                croppedBitmap = croppedBitmap,
+                requiredClasses = group.requiredClasses
+            )
+        }
+    }
+    
+    /**
+     * Объединяет классы на маске на основе результатов классификации типов блюд
+     */
+    fun mergeClassesOnMaskByDishType(
+        mask: Array<IntArray>,
+        dishTypeResults: List<DishTypeClassificationResult>
+    ): Array<IntArray> {
+        val height = mask.size
+        val width = if (height > 0) mask[0].size else 0
+        
+        if (height == 0 || width == 0) return mask
+        
+        // Создаем копию маски
+        val newMask = Array(height) { y -> IntArray(width) { x -> mask[y][x] } }
+        
+        // Для каждого успешно классифицированного типа блюда
+        dishTypeResults.forEach { result ->
+            if (result.classificationResult != "unknown" && result.region.classIds.size > 1) {
+                // Берем первый класс в группе как целевой
+                val targetClassId = result.region.classIds.first()
+                val allClassIds = result.region.classIds
                 
                 // Заменяем все пиксели других классов в группе на целевой класс
                 for (y in 0 until height) {

@@ -15,7 +15,8 @@ import com.example.snapcalorie.ui.theme.Green10
 import com.example.snapcalorie.ui.theme.Green50
 
 enum class Screen {
-    DIARY, STATS, CAMERA, RECOMMENDATIONS, PROFILE, IMAGE_SEGMENTATION
+    DIARY, STATS, CAMERA, RECOMMENDATIONS, PROFILE, IMAGE_SEGMENTATION, 
+    AR_CAMERA_TOP, AR_SEGMENTATION_TOP, AR_CAMERA_SIDE, AR_SEGMENTATION_SIDE, VOLUME_CALCULATION
 }
 
 @Composable

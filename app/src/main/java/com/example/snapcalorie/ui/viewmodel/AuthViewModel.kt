@@ -36,12 +36,20 @@ class AuthViewModel(private val repo: AuthRepository) : ViewModel() {
             _currentUserEmail.value = profile.email
             _error.value = null
         } catch (e: Exception) {
-            _error.value = when (e) {
+            val errorMessage = when (e) {
                 is UnknownHostException -> "Не удалось подключиться к серверу. Проверьте подключение к интернету."
                 else -> e.localizedMessage ?: "Неизвестная ошибка"
             }
-            _user.value = null
-            _currentUserEmail.value = null
+            _error.value = errorMessage
+            
+            // Только очищаем пользователя если это действительно ошибка авторизации
+            if (errorMessage.contains("Authentication failed") || 
+                errorMessage.contains("401") ||
+                errorMessage.contains("Unauthorized")) {
+                _user.value = null
+                _currentUserEmail.value = null
+            }
+            // При сетевых ошибках оставляем пользователя, чтобы не сбрасывать состояние
         }
     }
 

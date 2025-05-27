@@ -50,3 +50,9 @@ val Red30 = Color(0xFFFF8A92)
 val Red20 = Color(0xFFFFA2A9)
 val Red10 = Color(0xFFFFBCC1)
 val Red5  = Color(0xFFFFD6DA)
+
+// Blue colors
+val Blue50 = Color(0xFF3F88C5)
+
+// Purple colors
+val Purple50 = Color(0xFF7B68EE)

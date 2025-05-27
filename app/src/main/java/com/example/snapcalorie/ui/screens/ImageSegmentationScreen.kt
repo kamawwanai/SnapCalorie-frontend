@@ -12,8 +12,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,25 +28,35 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.scale
 import coil.compose.rememberAsyncImagePainter
 import com.example.snapcalorie.ui.components.NavBar
 import com.example.snapcalorie.ui.components.Screen
+import com.example.snapcalorie.ui.components.NutritionResultDialog
 import com.example.snapcalorie.ui.theme.*
 import com.example.snapcalorie.util.SegmentationModel
 import com.example.snapcalorie.util.MaskProcessor
 import com.example.snapcalorie.util.OpenCVInitializer
 import com.example.snapcalorie.util.BoundingBoxProcessor
 import com.example.snapcalorie.util.ClassificationRegion
+import com.example.snapcalorie.util.DishTypeClassificationRegion
+import com.example.snapcalorie.util.DishTypeClassificationResult
 import com.example.snapcalorie.network.ApiModule
 import com.example.snapcalorie.repository.ClassificationRepository
 import com.example.snapcalorie.storage.TokenStorage
+import com.example.snapcalorie.model.MealRecordCreate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.random.Random
+import com.example.snapcalorie.util.translateDishName
+import com.example.snapcalorie.util.NutritionDataLoader
+import com.example.snapcalorie.util.NutritionCalculationResult
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 data class RegionClassificationResult(
     val region: ClassificationRegion,
@@ -57,7 +70,8 @@ data class SegmentationResult(
     val labelColors: Map<Int, Color>,
     val labels: List<String>,
     val detectedClasses: Set<Int>,
-    val regionClassifications: List<RegionClassificationResult> = emptyList()
+    val regionClassifications: List<RegionClassificationResult> = emptyList(),
+    val dishTypeClassifications: List<DishTypeClassificationResult> = emptyList()
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -72,6 +86,15 @@ fun ImageSegmentationScreen(
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var isOpenCVReady by remember { mutableStateOf(false) }
+    var showMaskEditor by remember { mutableStateOf(false) }
+    
+    // Состояния для диалога результатов
+    var showNutritionDialog by remember { mutableStateOf(false) }
+    var nutritionResult by remember { mutableStateOf<NutritionCalculationResult?>(null) }
+    var selectedMealTypeName by remember { mutableStateOf<String?>(null) }
+    var selectedMealTypeValue by remember { mutableStateOf<Int?>(null) }
+    var isCalculating by remember { mutableStateOf(false) }
+    var isSendingMeal by remember { mutableStateOf(false) }
     
     val scope = rememberCoroutineScope()
     
@@ -93,13 +116,17 @@ fun ImageSegmentationScreen(
             val classAreas = mutableMapOf<Int, Int>()
             for (row in mask) {
                 for (classId in row) {
-                    classAreas[classId] = classAreas.getOrDefault(classId, 0) + 1
+                    if (classId > 0) { // Исключаем фон (класс 0)
+                        classAreas[classId] = classAreas.getOrDefault(classId, 0) + 1
+                    }
                 }
             }
             
-            // Фильтруем исключенные классы
-            val validClasses = classAreas.filter { (classId, _) ->
-                classId < labels.size && !excludedClasses.contains(labels[classId].lowercase())
+            // Фильтруем исключенные классы и классы, которых нет в маске
+            val validClasses = classAreas.filter { (classId, area) ->
+                area > 0 && // Класс должен присутствовать в маске
+                classId < labels.size && 
+                !excludedClasses.contains(labels[classId].lowercase())
             }
             
             val colorMap = mutableMapOf<Int, Color>()
@@ -145,9 +172,11 @@ fun ImageSegmentationScreen(
             for (y in 0 until maskHeight) {
                 for (x in 0 until maskWidth) {
                     val labelId = mask[y][x]
-                    // Проверяем, нужно ли исключить этот класс
-                    val shouldExclude = labelId < labels.size && 
-                                      excludedClasses.contains(labels[labelId].lowercase())
+                    // Проверяем, нужно ли исключить этот класс или он отсутствует в labelColors
+                    val shouldExclude = labelId <= 0 || // Исключаем фон и недопустимые значения
+                                      labelId >= labels.size || 
+                                      excludedClasses.contains(labels[labelId].lowercase()) ||
+                                      !labelColors.containsKey(labelId) // Исключаем классы без цвета
                     
                     val color = if (shouldExclude) {
                         Color.Transparent
@@ -168,6 +197,10 @@ fun ImageSegmentationScreen(
             segmentedBitmap
         }
     }
+    
+    // API сервисы
+    val tokenStorage = remember { TokenStorage(context) }
+    val apiService = remember { ApiModule.provideApiService { tokenStorage.token } }
     
     // Инициализируем OpenCV
     LaunchedEffect(Unit) {
@@ -219,28 +252,26 @@ fun ImageSegmentationScreen(
                         mask, labels, excludedClasses
                     )
                     
-                    // 4. Объединяем близкие классы
-                    val groupedBoxes = BoundingBoxProcessor.mergeCloseClasses(boundingBoxes)
+                    // 4. Группируем классы по типу блюда для более точной классификации
+                    val dishTypeGroups = BoundingBoxProcessor.groupClassesByDishType(boundingBoxes)
                     
-                    // 5. Создаем регионы для классификации
-                    val classificationRegions = BoundingBoxProcessor.createClassificationRegions(
-                        originalBitmap, groupedBoxes
+                    // 5. Создаем регионы для классификации по типу блюда
+                    val dishTypeClassificationRegions = BoundingBoxProcessor.createDishTypeClassificationRegions(
+                        originalBitmap, dishTypeGroups
                     )
                     
-                    // 6. Классифицируем каждый регион и обновляем labels
-                    val tokenStorage = TokenStorage(context)
-                    val apiService = ApiModule.provideApiService { tokenStorage.token }
+                    // 6. Классифицируем каждый регион по типу блюда и обновляем labels
                     val classificationRepository = ClassificationRepository(apiService, tokenStorage)
                     
                     // Создаем копию labels для модификации
                     val updatedLabels = labels.toMutableList()
-                    val regionClassifications = mutableListOf<RegionClassificationResult>()
+                    val dishTypeClassifications = mutableListOf<DishTypeClassificationResult>()
                     
                     // Вычисляем общую площадь изображения
                     val totalImageArea = originalBitmap.width * originalBitmap.height
                     val minRegionAreaThreshold = totalImageArea * 0.05 // 5% от общей площади
                     
-                    for (region in classificationRegions) {
+                    for (region in dishTypeClassificationRegions) {
                         try {
                             // Вычисляем площадь региона
                             val regionArea = region.boundingBox.width() * region.boundingBox.height()
@@ -259,8 +290,8 @@ fun ImageSegmentationScreen(
                                     }
                                 }
                                 
-                                regionClassifications.add(
-                                    RegionClassificationResult(
+                                dishTypeClassifications.add(
+                                    DishTypeClassificationResult(
                                         region = region,
                                         classificationResult = classificationResponse.predictedClass
                                     )
@@ -271,67 +302,32 @@ fun ImageSegmentationScreen(
                         }
                     }
                     
-                    // 7. Выполняем детальную классификацию всего изображения
-                    var finalUpdatedLabels = updatedLabels
-                    var finalLabelColors = assignColorsByAreaWithClassification(mask, updatedLabels, null)
-                    var finalSegmentedBitmap = createSegmentedBitmapWithClassification(
-                        originalBitmap, mask, finalLabelColors, updatedLabels, null
-                    )
-                    var finalMask = mask
-                    
-                    try {
-                        val detailedClassification = classificationRepository.classifyImageDetailed(context, imageUri)
-                        
-                        // Если уверенность больше 95%, объединяем все близкие классы
-                        if (detailedClassification.confidencePercentage > 95.0) {
-                            // Находим все bounding box снова для объединения
-                            val allBoundingBoxes = BoundingBoxProcessor.findClassBoundingBoxes(
-                                mask, updatedLabels, excludedClasses
-                            )
-                            
-                            // Объединяем все близкие классы (в пределах 3 пикселей)
-                            val mergedGroups = BoundingBoxProcessor.mergeAllCloseClasses(allBoundingBoxes, 3)
-                            
-                            // Физически объединяем классы на маске
-                            finalMask = BoundingBoxProcessor.mergeClassesOnMask(mask, mergedGroups)
-                            
-                            // Создаем новую копию labels для финальных изменений
-                            finalUpdatedLabels = updatedLabels.toMutableList()
-                            
-                            // Заменяем названия всех классов в объединенных группах
-                            mergedGroups.forEach { group ->
-                                if (group.size > 1) { // Только если группа содержит несколько классов
-                                    group.forEach { boundingBox ->
-                                        if (boundingBox.classId < finalUpdatedLabels.size) {
-                                            finalUpdatedLabels[boundingBox.classId] = detailedClassification.predictedClass
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // Пересоздаем цветовую схему и изображение с новыми labels и объединенной маской
-                            finalLabelColors = assignColorsByAreaWithClassification(finalMask, finalUpdatedLabels, null)
-                            finalSegmentedBitmap = createSegmentedBitmapWithClassification(
-                                originalBitmap, finalMask, finalLabelColors, finalUpdatedLabels, null
-                            )
-                        }
-                    } catch (e: Exception) {
-                        // Если детальная классификация не удалась, используем результаты региональной классификации
+                    // Физически объединяем классы на маске для успешно классифицированных групп блюд
+                    var processedMask = mask
+                    if (dishTypeClassifications.isNotEmpty()) {
+                        processedMask = BoundingBoxProcessor.mergeClassesOnMaskByDishType(mask, dishTypeClassifications)
                     }
                     
+                    // Создаем финальные результаты
+                    val finalLabelColors = assignColorsByAreaWithClassification(processedMask, updatedLabels, null)
+                    val finalSegmentedBitmap = createSegmentedBitmapWithClassification(
+                        originalBitmap, processedMask, finalLabelColors, updatedLabels, null
+                    )
+                    
                     // Находим все классы, присутствующие на изображении
-                    val detectedClasses = finalMask.flatMap { it.toList() }.toSet()
+                    val detectedClasses = processedMask.flatMap { it.toList() }.toSet()
                     
                     segmentationModel.close()
                     
                     SegmentationResult(
                         originalBitmap = originalBitmap,
                         segmentedBitmap = finalSegmentedBitmap,
-                        mask = finalMask,
+                        mask = processedMask,
                         labelColors = finalLabelColors,
-                        labels = finalUpdatedLabels,
+                        labels = updatedLabels,
                         detectedClasses = detectedClasses,
-                        regionClassifications = regionClassifications
+                        regionClassifications = emptyList(),
+                        dishTypeClassifications = dishTypeClassifications
                     )
                 }
                 
@@ -341,6 +337,47 @@ fun ImageSegmentationScreen(
             } finally {
                 isLoading = false
             }
+        }
+    }
+    
+    // Функция для обновления результата сегментации после редактирования
+    val updateSegmentationResult = remember {
+        { newMask: Array<IntArray>, updatedLabels: List<String>, updatedLabelColors: Map<Int, Color> ->
+            segmentationResult?.let { result ->
+                // Отладочная информация
+                println("ImageSegmentationScreen: Получены обновленные данные")
+                println("Оригинальные лейблы: ${result.labels}")
+                println("Обновленные лейблы: $updatedLabels")
+                println("Оригинальные цвета: ${result.labelColors}")
+                println("Обновленные цвета: $updatedLabelColors")
+                
+                // Находим все уникальные классы в новой маске
+                val detectedClassesInMask = mutableSetOf<Int>()
+                for (row in newMask) {
+                    for (classId in row) {
+                        if (classId > 0) { // Исключаем фон (класс 0)
+                            detectedClassesInMask.add(classId)
+                        }
+                    }
+                }
+                
+                // Используем обновленные цвета вместо пересчета
+                val finalSegmentedBitmap = createSegmentedBitmapWithClassification(
+                    result.originalBitmap, newMask, updatedLabelColors, updatedLabels, null
+                )
+                
+                segmentationResult = result.copy(
+                    mask = newMask,
+                    segmentedBitmap = finalSegmentedBitmap,
+                    labelColors = updatedLabelColors,
+                    labels = updatedLabels,
+                    detectedClasses = detectedClassesInMask
+                )
+                
+                println("ImageSegmentationScreen: Результат обновлен, новые лейблы: ${segmentationResult?.labels}")
+                println("ImageSegmentationScreen: Результат обновлен, новые цвета: ${segmentationResult?.labelColors}")
+            }
+            showMaskEditor = false
         }
     }
     
@@ -491,18 +528,40 @@ fun ImageSegmentationScreen(
                                     )
                                 )
                                 
-                                Image(
-                                    bitmap = result.segmentedBitmap.asImageBitmap(),
-                                    contentDescription = "Сегментированное изображение",
+                                Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(200.dp)
-                                        .background(
-                                            color = Base5,
-                                            shape = RoundedCornerShape(8.dp)
-                                        ),
-                                    contentScale = ContentScale.Crop
-                                )
+                                ) {
+                                    Image(
+                                        bitmap = result.segmentedBitmap.asImageBitmap(),
+                                        contentDescription = "Сегментированное изображение",
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(
+                                                color = Base5,
+                                                shape = RoundedCornerShape(8.dp)
+                                            ),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                    
+                                    // Кнопка редактирования маски
+                                    FloatingActionButton(
+                                        onClick = { showMaskEditor = true },
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .padding(12.dp)
+                                            .size(48.dp),
+                                        containerColor = Orange50,
+                                        contentColor = Color.White
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Edit,
+                                            contentDescription = "Редактировать маску",
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                         
@@ -513,36 +572,115 @@ fun ImageSegmentationScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
-                                    Text(
-                                        text = "Обнаруженные продукты",
-                                        style = TextStyle(
-                                            fontFamily = montserratFamily,
-                                            fontWeight = FontWeight.Normal,
-                                            fontSize = 16.sp,
-                                            lineHeight = 20.sp,
-                                            color = Base90
-                                        )
-                                    )
-                                    
-                                    Column(
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    // Заголовок с обозначениями колонок
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
-                                        // Показываем все классы с обновленными названиями
-                                        result.labelColors.toList().forEach { (labelId, color) ->
+                                        // Левая часть: пустое место под прямоугольник и название
+                                        Row(
+                                            modifier = Modifier.weight(1f),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                        ) {
+                                            Spacer(modifier = Modifier.size(20.dp)) // Место под прямоугольник
+                                            Text(
+                                                text = "", // Пустое место под название
+                                                style = TextStyle(
+                                                    fontFamily = montserratFamily,
+                                                    fontSize = 12.sp,
+                                                    color = Base90
+                                                )
+                                            )
+                                        }
+                                        
+                                        // Правая часть: заголовки колонок
+                                        Row(
+                                            modifier = Modifier.weight(1f),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            // Калории
+                                            Text(
+                                                text = "к/100 г",
+                                                modifier = Modifier.weight(1f),
+                                                style = TextStyle(
+                                                    fontFamily = montserratFamily,
+                                                    fontWeight = FontWeight.Normal,
+                                                    fontSize = 12.sp,
+                                                    color = Base70
+                                                ),
+                                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                            )
+                                            
+                                            // Белки
+                                            Text(
+                                                text = "п/100 г",
+                                                modifier = Modifier.weight(1f),
+                                                style = TextStyle(
+                                                    fontFamily = montserratFamily,
+                                                    fontWeight = FontWeight.Normal,
+                                                    fontSize = 12.sp,
+                                                    color = Base70
+                                                ),
+                                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                            )
+                                            
+                                            // Жиры
+                                            Text(
+                                                text = "ж/100 г",
+                                                modifier = Modifier.weight(1f),
+                                                style = TextStyle(
+                                                    fontFamily = montserratFamily,
+                                                    fontWeight = FontWeight.Normal,
+                                                    fontSize = 12.sp,
+                                                    color = Base70
+                                                ),
+                                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                            )
+                                            
+                                            // Углеводы
+                                            Text(
+                                                text = "у/\n100 г",
+                                                modifier = Modifier.weight(1f),
+                                                style = TextStyle(
+                                                    fontFamily = montserratFamily,
+                                                    fontWeight = FontWeight.Normal,
+                                                    fontSize = 12.sp,
+                                                    color = Base70
+                                                ),
+                                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                            )
+                                        }
+                                    }
+                                    
+                                    // Показываем все классы с обновленными названиями и питательной информацией
+                                    result.labelColors.toList().forEach { (labelId, color) ->
+                                        val categoryName = if (labelId < result.labels.size) result.labels[labelId] else "unknown"
+                                        val nutritionInfo = NutritionDataLoader().getNutritionInfo(context, categoryName)
+                                        
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(
+                                                    color = Color.White,
+                                                    shape = RoundedCornerShape(8.dp)
+                                                )
+                                                .padding(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                        ) {
+                                            // Левая часть: прямоугольник и название
                                             Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .background(
-                                                        color = Base5,
-                                                        shape = RoundedCornerShape(8.dp)
-                                                    )
-                                                    .padding(12.dp),
+                                                modifier = Modifier.weight(1f),
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                                             ) {
                                                 Box(
                                                     modifier = Modifier
-                                                        .size(24.dp)
+                                                        .size(20.dp)
                                                         .background(
                                                             color = color.copy(alpha = 1f),
                                                             shape = RoundedCornerShape(4.dp)
@@ -550,14 +688,223 @@ fun ImageSegmentationScreen(
                                                 )
                                                 
                                                 Text(
-                                                    text = if (labelId < result.labels.size) result.labels[labelId] else "Класс $labelId",
+                                                    text = translateDishName(categoryName),
                                                     style = TextStyle(
                                                         fontFamily = montserratFamily,
-                                                        fontSize = 14.sp,
+                                                        fontSize = 12.sp,
                                                         color = Base90
                                                     )
                                                 )
                                             }
+                                            
+                                            // Правая часть: питательная информация
+                                            if (nutritionInfo != null) {
+                                                Row(
+                                                    modifier = Modifier.weight(1f),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    // Калории
+                                                    Text(
+                                                        text = nutritionInfo.calories.toString(),
+                                                        modifier = Modifier.weight(1f),
+                                                        style = TextStyle(
+                                                            fontFamily = montserratFamily,
+                                                            fontWeight = FontWeight.Normal,
+                                                            fontSize = 12.sp,
+                                                            color = Base70
+                                                        ),
+                                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                                    )
+                                                    
+                                                    // Белки
+                                                    Text(
+                                                        text = String.format("%.1f", nutritionInfo.protein),
+                                                        modifier = Modifier.weight(1f),
+                                                        style = TextStyle(
+                                                            fontFamily = montserratFamily,
+                                                            fontWeight = FontWeight.Normal,
+                                                            fontSize = 12.sp,
+                                                            color = Base70
+                                                        ),
+                                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                                    )
+                                                    
+                                                    // Жиры
+                                                    Text(
+                                                        text = String.format("%.1f", nutritionInfo.fat),
+                                                        modifier = Modifier.weight(1f),
+                                                        style = TextStyle(
+                                                            fontFamily = montserratFamily,
+                                                            fontWeight = FontWeight.Normal,
+                                                            fontSize = 12.sp,
+                                                            color = Base70
+                                                        ),
+                                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                                    )
+                                                    
+                                                    // Углеводы
+                                                    Text(
+                                                        text = String.format("%.1f", nutritionInfo.carbs),
+                                                        modifier = Modifier.weight(1f),
+                                                        style = TextStyle(
+                                                            fontFamily = montserratFamily,
+                                                            fontWeight = FontWeight.Normal,
+                                                            fontSize = 12.sp,
+                                                            color = Base70
+                                                        ),
+                                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Поля ввода для расчета
+                        item {
+                            var selectedMealType by remember { mutableStateOf<String?>(null) }
+                            var weightText by remember { mutableStateOf("") }
+                            var showMealTypeDropdown by remember { mutableStateOf(false) }
+                            
+                            val mealTypes = listOf(
+                                "Завтрак" to 1,
+                                "Перекус (утро)" to 2,
+                                "Обед" to 3,
+                                "Перекус (день)" to 4,
+                                "Ужин" to 5,
+                                "Перекус (вечер)" to 6,
+                                "Тренировка" to 7,
+                                "Другое" to 8
+                            )
+                            
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                // Выбор категории приема пищи
+                                Box(
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    OutlinedTextField(
+                                        value = selectedMealType ?: "",
+                                        onValueChange = { },
+                                        label = { Text("Выбор категории") },
+                                        readOnly = true,
+                                        trailingIcon = {
+                                            IconButton(onClick = { showMealTypeDropdown = true }) {
+                                                Icon(
+                                                    imageVector = Icons.Default.ArrowDropDown,
+                                                    contentDescription = "Выбрать категорию"
+                                                )
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = Green50,
+                                            focusedLabelColor = Green50
+                                        )
+                                    )
+                                    
+                                    DropdownMenu(
+                                        expanded = showMealTypeDropdown,
+                                        onDismissRequest = { showMealTypeDropdown = false }
+                                    ) {
+                                        mealTypes.forEach { (name, value) ->
+                                            DropdownMenuItem(
+                                                text = { Text(name) },
+                                                onClick = {
+                                                    selectedMealType = name
+                                                    showMealTypeDropdown = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                                
+                                // Ввод массы
+                                OutlinedTextField(
+                                    value = weightText,
+                                    onValueChange = { newValue ->
+                                        // Разрешаем только цифры
+                                        if (newValue.all { it.isDigit() } || newValue.isEmpty()) {
+                                            weightText = newValue
+                                        }
+                                    },
+                                    label = { Text("Масса (г)") },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = Green50,
+                                        focusedLabelColor = Green50
+                                    )
+                                )
+                                
+                                // Кнопка расчета по правому краю
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            segmentationResult?.let { result ->
+                                                scope.launch {
+                                                    try {
+                                                        isCalculating = true
+                                                        
+                                                        // Получаем объем в мл из введенной массы
+                                                        val volumeMl = weightText.toDoubleOrNull() ?: 0.0
+                                                        
+                                                        // Рассчитываем КБЖУ
+                                                        val calculationResult = NutritionDataLoader().calculateNutritionFromMask(
+                                                            context = context,
+                                                            mask = result.mask,
+                                                            labels = result.labels,
+                                                            labelColors = result.labelColors,
+                                                            volumeMl = volumeMl,
+                                                            excludedClasses = excludedClasses
+                                                        )
+                                                        
+                                                        // Сохраняем результаты и показываем диалог
+                                                        nutritionResult = calculationResult
+                                                        selectedMealTypeName = selectedMealType
+                                                        selectedMealTypeValue = mealTypes.find { it.first == selectedMealType }?.second
+                                                        showNutritionDialog = true
+                                                        
+                                                    } catch (e: Exception) {
+                                                        error = "Ошибка при расчете: ${e.message}"
+                                                    } finally {
+                                                        isCalculating = false
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        enabled = selectedMealType != null && weightText.isNotEmpty() && !isCalculating,
+                                        modifier = Modifier.height(52.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Green50,
+                                            contentColor = Color.White,
+                                            disabledContainerColor = Base20,
+                                            disabledContentColor = Base50
+                                        ),
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        if (isCalculating) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(20.dp),
+                                                color = Color.White,
+                                                strokeWidth = 2.dp
+                                            )
+                                        } else {
+                                            Text(
+                                                text = "Рассчитать",
+                                                style = TextStyle(
+                                                    fontFamily = montserratFamily,
+                                                    fontWeight = FontWeight.Medium,
+                                                    fontSize = 16.sp
+                                                )
+                                            )
                                         }
                                     }
                                 }
@@ -572,5 +919,67 @@ fun ImageSegmentationScreen(
                 onScreenSelected = onNavigateToScreen
             )
         }
+    }
+    
+    // Экран редактирования маски
+    if (showMaskEditor && segmentationResult != null) {
+        MaskEditingScreen(
+            originalBitmap = segmentationResult!!.originalBitmap,
+            segmentedBitmap = segmentationResult!!.segmentedBitmap,
+            mask = segmentationResult!!.mask,
+            labelColors = segmentationResult!!.labelColors,
+            labels = segmentationResult!!.labels,
+            onSave = updateSegmentationResult,
+            onCancel = { showMaskEditor = false }
+        )
+    }
+    
+    // Диалог результатов расчета
+    if (showNutritionDialog && nutritionResult != null && selectedMealTypeName != null) {
+        NutritionResultDialog(
+            mealTypeName = selectedMealTypeName!!,
+            nutritionResult = nutritionResult!!,
+            isSending = isSendingMeal,
+            onSend = {
+                scope.launch {
+                    try {
+                        isSendingMeal = true
+                        
+                        // Создаем запись о приеме пищи
+                        val currentDateTime = LocalDateTime.now()
+                        val formatter = DateTimeFormatter.ISO_LOCAL_DATE_TIME
+                        
+                        val mealRecord = MealRecordCreate(
+                            datetime = currentDateTime.format(formatter),
+                            calories = nutritionResult!!.calories.toDouble(),
+                            proteins = nutritionResult!!.proteins.toDouble(),
+                            fats = nutritionResult!!.fats.toDouble(),
+                            carbs = nutritionResult!!.carbohydrates.toDouble(),
+                            meal_type = selectedMealTypeValue ?: 8, // По умолчанию "Другое"
+                            image_path = null // Как указано в требованиях
+                        )
+                        
+                        // Отправляем на сервер
+                        val authHeader = "Bearer ${tokenStorage.token}"
+                        apiService.createMealRecord(authHeader, mealRecord)
+                        
+                        // Закрываем диалог и возвращаемся назад
+                        showNutritionDialog = false
+                        onNavigateBack()
+                        
+                    } catch (e: Exception) {
+                        error = "Ошибка при сохранении: ${e.message}"
+                    } finally {
+                        isSendingMeal = false
+                    }
+                }
+            },
+            onDismiss = {
+                showNutritionDialog = false
+                nutritionResult = null
+                selectedMealTypeName = null
+                selectedMealTypeValue = null
+            }
+        )
     }
 } 

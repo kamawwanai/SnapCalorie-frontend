@@ -8,7 +8,8 @@ import com.example.snapcalorie.model.OnboardingPlanData
 import com.example.snapcalorie.model.OnboardingPlanResponse
 import com.example.snapcalorie.model.NutritionPlan
 import com.example.snapcalorie.model.ClassificationResponse
-import com.example.snapcalorie.model.DetailedClassificationResponse
+import com.example.snapcalorie.model.MealRecordCreate
+import com.example.snapcalorie.model.MealRecordSchema
 import com.example.snapcalorie.ui.viewmodel.UserData
 import com.example.snapcalorie.ui.viewmodel.PlanData
 import com.example.snapcalorie.ui.viewmodel.ProfileData
@@ -66,10 +67,10 @@ interface ApiService {
         @Part file: MultipartBody.Part
     ): ClassificationResponse
 
-    @Multipart
-    @POST("classification/classify-detailed")
-    suspend fun classifyImageDetailed(
+    @POST("meals/")
+    @Headers("Content-Type: application/json")
+    suspend fun createMealRecord(
         @Header("Authorization") bearer: String,
-        @Part file: MultipartBody.Part
-    ): DetailedClassificationResponse
+        @Body meal: MealRecordCreate
+    ): MealRecordSchema
 }

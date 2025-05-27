@@ -103,6 +103,11 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
+    // TensorFlow Lite
+    implementation("org.tensorflow:tensorflow-lite:2.14.0")
+    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
+    implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
+    
     // Google Play Services TensorFlow Lite - correct versions
     implementation("com.google.android.gms:play-services-tflite-java:16.4.0")
     implementation("com.google.android.gms:play-services-tflite-gpu:16.4.0")
